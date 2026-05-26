@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — Source of Truth{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold">{{ icon or '' }} {{ title }}</h1>
+      <p class="text-sm text-muted mt-1">{{ total }} {{ description }}{{ 's' if total != 1 else '' }} · newest first</p>
+    </div>
+    <div class="flex gap-2">
+      <a href="{{ url_for('source_of_truth.dashboard') }}" class="px-3 py-1.5 bg-surface text-foreground rounded-button text-sm border border-border hover:bg-surface-hover no-underline">← Dashboard</a>
+      <a href="{{ url_for('source_of_truth.ingest_form') }}" class="px-3 py-1.5 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover no-underline">+ Ingest</a>
+    </div>
+  </div>
+
+  {% if cards %}
+  <div class="space-y-3">
+    {% for card in cards %}
+    <div class="bg-panel rounded-lg border border-border p-4 prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-subtle prose-li:text-subtle prose-a:text-accent prose-strong:text-foreground">
+      {{ card | markdown | safe }}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="bg-panel rounded-lg border border-border p-12 text-center">
+    <h3 class="text-lg font-medium mb-2">No {{ description }}s yet</h3>
+    <p class="text-muted text-sm mb-4">Ingest an Ahrefs article to extract content.</p>
+    <a href="{{ url_for('source_of_truth.ingest_form') }}" class="px-4 py-2 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover inline-block no-underline">+ Ingest Content</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
