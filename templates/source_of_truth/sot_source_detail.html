@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ source.title }} — SOT Source{% endblock %}
+{% block content %}
+<div class="space-y-5">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <div>
+      <div class="text-sm text-muted mb-1"><a href="{{ url_for('source_of_truth.sources_view') }}" class="text-accent no-underline">Sources</a> / ingestion #{{ source.pending_id }}</div>
+      <h1 class="text-2xl font-bold break-words">{{ source.title }}</h1>
+      {% if source.url %}<a href="{{ source.url }}" target="_blank" class="text-sm text-accent no-underline break-all">{{ source.url }}</a>{% else %}<p class="text-sm text-muted break-all mt-1">{{ source.source_id }}</p>{% endif %}
+    </div>
+    <div class="flex gap-2 flex-wrap">
+      <a href="{{ url_for('source_of_truth.sources_view') }}" class="px-3 py-2 bg-surface text-foreground rounded-button text-sm border border-border hover:bg-surface-hover no-underline">← All sources</a>
+      {% if pu.status == 'pending' %}<a href="{{ url_for('source_of_truth.review', pu_id=pu.id) }}" class="px-3 py-2 bg-warning/10 text-warning rounded-button text-sm border border-warning/30 hover:bg-warning/20 no-underline">Review extraction</a>{% endif %}
+    </div>
+  </div>
+
+  <div class="grid md:grid-cols-4 gap-3">
+    <div class="bg-panel border border-border rounded-lg p-4">
+      <div class="text-xs text-muted uppercase tracking-wide">Date ingested</div>
+      <div class="font-medium mt-1">{{ source.created_at|timeago if source.created_at else '—' }}</div>
+    </div>
+    <div class="bg-panel border border-border rounded-lg p-4">
+      <div class="text-xs text-muted uppercase tracking-wide">Type</div>
+      <div class="font-medium mt-1">{{ source.source_type }}</div>
+    </div>
+    <div class="bg-panel border border-border rounded-lg p-4">
+      <div class="text-xs text-muted uppercase tracking-wide">Last action</div>
+      <div class="font-medium mt-1">{{ source.status }}</div>
+    </div>
+    <div class="bg-panel border border-border rounded-lg p-4">
+      <div class="text-xs text-muted uppercase tracking-wide">Extracted</div>
+      <div class="font-medium mt-1">{{ source.counts.insights|default(0) }} I · {{ source.counts.concepts|default(0) }} C · {{ source.counts.products|default(0) }} P · {{ source.counts.howtos|default(0) }} H</div>
+    </div>
+  </div>
+
+  {% if source.error %}
+  <div class="bg-danger/10 border border-danger/30 rounded-lg p-4 text-danger text-sm">{{ source.error }}</div>
+  {% endif %}
+
+  {% set buckets = [('insights','Insights & Stats','📊'), ('concepts','Concepts & Mechanisms','🧩'), ('products','Product Info','📦'), ('howtos','How-Tos','🛠️')] %}
+
+  <div class="space-y-6">
+    {% for bucket, label, icon in buckets %}
+    <section class="bg-panel border border-border rounded-lg overflow-hidden">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+        <h2 class="font-semibold">{{ icon }} {{ label }}</h2>
+        <span class="text-xs text-muted">{{ saved.get(bucket, [])|length }} saved · {{ proposed.get(bucket, [])|length }} proposed</span>
+      </div>
+      {% if saved.get(bucket) %}
+      <div class="p-4 space-y-3">
+        <div class="text-xs font-medium text-muted uppercase tracking-wide">Accepted / currently in SOT</div>
+        {% for item in saved.get(bucket) %}
+          {% if bucket == 'howtos' %}
+          <a href="{{ url_for('source_of_truth.howto_view', path=item.path) }}" class="block bg-surface border border-border rounded-lg p-3 no-underline hover:bg-surface-hover">
+            <div class="font-medium text-foreground">{{ item.title }}</div>
+            {% if item.summary %}<div class="text-sm text-muted mt-1">{{ item.summary }}</div>{% endif %}
+          </a>
+          {% else %}
+          <div class="bg-surface border border-border rounded-lg p-3 prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-subtle prose-li:text-subtle prose-a:text-accent prose-strong:text-foreground">
+            {{ item.markdown | markdown | safe }}
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% elif proposed.get(bucket) %}
+      <div class="p-4 space-y-3">
+        <div class="text-xs font-medium text-muted uppercase tracking-wide">Proposed in this ingestion</div>
+        {% for item in proposed.get(bucket) %}
+          <div class="bg-surface border border-border rounded-lg p-3">
+            <div class="font-medium text-foreground">{{ item_title(bucket, item) }}</div>
+            {% if item.summary %}<div class="text-sm text-muted mt-1">{{ item.summary }}</div>{% endif %}
+            {% if item.detail %}<div class="text-sm text-muted mt-1">{{ item.detail }}</div>{% endif %}
+            {% if item.source_url %}<a href="{{ item.source_url }}" target="_blank" class="text-xs text-accent no-underline break-all mt-2 inline-block">{{ item.source_url }}</a>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="p-6 text-sm text-muted">No {{ label|lower }} linked to this source.</div>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
