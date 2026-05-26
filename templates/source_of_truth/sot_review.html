@@ -1,0 +1,427 @@
+{% extends "base.html" %}
+{% block title %}Review Extraction — Source of Truth{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center gap-2 text-sm text-muted">
+    <a href="{{ url_for('source_of_truth.dashboard') }}" class="hover:text-foreground no-underline">Source of Truth</a>
+    <span>/</span>
+    <span class="text-foreground">Review Extraction</span>
+  </div>
+
+  <div>
+    <h1 class="text-2xl font-bold">Review Extraction</h1>
+    <p class="text-sm text-muted mt-1">
+      Source: <span class="text-subtle">{{ pu.source_type }}</span>
+      {% if pu.source_ref %} · <span class="text-subtle">{{ pu.source_ref }}</span>{% endif %}
+      · {{ pu.created_at|timeago }}
+    </p>
+  </div>
+
+  {% if pu.status == 'extracting' %}
+  <div class="bg-panel rounded-lg border border-border p-8 text-center">
+    <div class="animate-spin w-8 h-8 border-2 border-accent border-t-transparent rounded-full mx-auto mb-4"></div>
+    <p class="font-medium">Still extracting…</p>
+    <p class="text-sm text-muted">Refresh this page in a moment.</p>
+  </div>
+  {% elif pu.status != 'pending' %}
+  <div class="bg-panel rounded-lg border border-border p-8 text-center">
+    <p class="font-medium">This extraction has been {{ pu.status }}.</p>
+    <a href="{{ url_for('source_of_truth.dashboard') }}" class="text-accent no-underline text-sm mt-2 inline-block">← Back to dashboard</a>
+  </div>
+  {% else %}
+
+  {% set proposed = pu.proposed_changes or {} %}
+  {% set howtos = proposed.get('howtos', []) %}
+  {% set insights = proposed.get('insights', []) %}
+  {% set concepts = proposed.get('concepts', []) %}
+  {% set la_howtos = proposed.get('lookalikes_howtos', []) %}
+  {% set la_insights = proposed.get('lookalikes_insights', []) %}
+  {% set la_concepts = proposed.get('lookalikes_concepts', []) %}
+  {% set per_url = proposed.get('per_url', []) %}
+  {% set per_file = proposed.get('per_file', []) %}
+  {% set file_note = proposed.get('note') %}
+
+  <!-- Per-URL status block -->
+  {% if per_url %}
+  <div class="bg-panel rounded-lg border border-border p-4">
+    <h2 class="text-sm font-semibold mb-2 text-muted uppercase tracking-wide">Per-URL Summary</h2>
+    <div class="space-y-1">
+      {% for s in per_url %}
+      <div class="flex items-center justify-between text-sm">
+        <div class="flex items-center gap-2 min-w-0">
+          {% if s.status == 'ok' %}
+            <span class="inline-block w-2 h-2 rounded-full bg-success flex-shrink-0"></span>
+          {% else %}
+            <span class="inline-block w-2 h-2 rounded-full bg-error flex-shrink-0"></span>
+          {% endif %}
+          <a href="{{ s.url }}" target="_blank" class="text-subtle truncate no-underline hover:text-foreground">{{ s.url }}</a>
+        </div>
+        <div class="text-xs text-muted ml-3 flex-shrink-0">
+          {% if s.status == 'ok' %}
+            {{ s.howto_count or 0 }} how-to{{ 's' if (s.howto_count or 0) != 1 else '' }} · {{ s.insight_count or 0 }} insight{{ 's' if (s.insight_count or 0) != 1 else '' }} · {{ s.concept_count or 0 }} concept{{ 's' if (s.concept_count or 0) != 1 else '' }}{% if s.chunks and s.chunks > 1 %} · <span class="text-accent">{{ s.chunks }} chunks</span>{% endif %}
+          {% else %}
+            <span class="text-error">{{ s.status }}{% if s.error %} — {{ s.error }}{% endif %}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Per-File status block -->
+  {% if per_file %}
+  <div class="bg-panel rounded-lg border border-border p-4">
+    <h2 class="text-sm font-semibold mb-2 text-muted uppercase tracking-wide">Per-File Summary{% if file_note %} · <span class="normal-case text-subtle font-normal">{{ file_note }}</span>{% endif %}</h2>
+    <div class="space-y-1">
+      {% for s in per_file %}
+      <div class="flex items-center justify-between text-sm">
+        <div class="flex items-center gap-2 min-w-0">
+          {% if s.status == 'ok' %}
+            <span class="inline-block w-2 h-2 rounded-full bg-success flex-shrink-0"></span>
+          {% else %}
+            <span class="inline-block w-2 h-2 rounded-full bg-error flex-shrink-0"></span>
+          {% endif %}
+          <span class="text-subtle truncate">📄 {{ s.name }}</span>
+        </div>
+        <div class="text-xs text-muted ml-3 flex-shrink-0">
+          {% if s.status == 'ok' %}
+            {{ s.howto_count or 0 }} how-to{{ 's' if (s.howto_count or 0) != 1 else '' }} · {{ s.insight_count or 0 }} insight{{ 's' if (s.insight_count or 0) != 1 else '' }} · {{ s.concept_count or 0 }} concept{{ 's' if (s.concept_count or 0) != 1 else '' }}{% if s.chunks and s.chunks > 1 %} · <span class="text-accent">{{ s.chunks }} chunks</span>{% endif %}
+          {% else %}
+            <span class="text-error">{{ s.status }}{% if s.error %} — {{ s.error }}{% endif %}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if not howtos and not insights and not concepts %}
+  <div class="bg-panel rounded-lg border border-border p-8 text-center">
+    <p class="font-medium">Nothing on-spec was found.</p>
+    <p class="text-sm text-muted mt-2">No Ahrefs how-tos and no quotable stats matched the bar.</p>
+    <div class="mt-4 flex gap-2 justify-center">
+      <button onclick="dismiss()" class="px-4 py-2 bg-surface text-foreground rounded-button text-sm border border-border hover:bg-surface-hover transition">Dismiss</button>
+      <a href="{{ url_for('source_of_truth.dashboard') }}" class="px-4 py-2 bg-surface text-foreground rounded-button text-sm border border-border hover:bg-surface-hover transition no-underline">Dashboard</a>
+    </div>
+  </div>
+  {% else %}
+
+  {# Build grouping: dict source_url -> {howtos, insights, concepts, products} #}
+  {% set groups = namespace(d={}) %}
+  {% for h in howtos %}
+    {% set key = h.source_url or '__nosource__' %}
+    {% set _ = groups.d.setdefault(key, {'howtos': [], 'insights': [], 'concepts': [], 'products': []}) %}
+    {% set _ = groups.d[key]['howtos'].append((loop.index0, h)) %}
+  {% endfor %}
+  {% for ins in insights %}
+    {% set key = ins.source_url or '__nosource__' %}
+    {% set _ = groups.d.setdefault(key, {'howtos': [], 'insights': [], 'concepts': [], 'products': []}) %}
+    {% set _ = groups.d[key]['insights'].append((loop.index0, ins)) %}
+  {% endfor %}
+  {% for con in concepts %}
+    {% set key = con.source_url or '__nosource__' %}
+    {% set _ = groups.d.setdefault(key, {'howtos': [], 'insights': [], 'concepts': [], 'products': []}) %}
+    {% set _ = groups.d[key]['concepts'].append((loop.index0, con)) %}
+  {% endfor %}
+  {% for pr in products %}
+    {% set key = pr.source_url or '__nosource__' %}
+    {% set _ = groups.d.setdefault(key, {'howtos': [], 'insights': [], 'concepts': [], 'products': []}) %}
+    {% set _ = groups.d[key]['products'].append((loop.index0, pr)) %}
+  {% endfor %}
+
+  <!-- Bulk action bar -->
+  <div class="flex items-center justify-between bg-surface rounded-lg border border-border px-4 py-2 text-sm">
+    <div class="text-muted">
+      <span class="font-medium text-foreground">{{ insights|length }}</span> insights ·
+      <span class="font-medium text-foreground">{{ concepts|length }}</span> concepts ·
+      <span class="font-medium text-foreground">{{ howtos|length }}</span> how-tos · grouped under <span class="font-medium text-foreground">{{ groups.d|length }}</span> source{{ 's' if groups.d|length != 1 else '' }}
+    </div>
+    <div class="flex gap-3">
+      <button onclick="setAll(true)" class="text-accent hover:text-accent-hover">Select all</button>
+      <button onclick="setAll(false)" class="text-muted hover:text-foreground">Clear all</button>
+    </div>
+  </div>
+
+  <!-- Grouped items -->
+  {% for source_url, items in groups.d.items() %}
+  <div class="bg-panel rounded-lg border border-border overflow-hidden">
+    {# Determine if source is a file (check first item) #}
+    {% set first_item = (items['insights'][0][1] if items['insights'] else (items['concepts'][0][1] if items['concepts'] else (items['products'][0][1] if items['products'] else (items['howtos'][0][1] if items['howtos'] else {})))) %}
+    {% set is_file = first_item.get('is_file') %}
+    <div class="px-4 py-3 border-b border-border bg-surface/30 flex items-center justify-between">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-xs uppercase tracking-wide text-muted">Source</span>
+        {% if source_url == '__nosource__' %}
+          <span class="text-sm font-medium text-muted">(no source URL)</span>
+        {% elif is_file %}
+          <span class="text-sm font-medium text-foreground truncate">📄 {{ source_url }}</span>
+          {% if first_item.get('source_title') %}<span class="text-xs text-muted ml-1">— {{ first_item.source_title }}</span>{% endif %}
+        {% else %}
+          <a href="{{ source_url }}" target="_blank" class="text-sm font-medium text-foreground truncate no-underline hover:text-accent">{{ source_url }}</a>
+        {% endif %}
+      </div>
+      <div class="text-xs text-muted flex-shrink-0">
+        {{ items['howtos']|length }} how-to{{ 's' if items['howtos']|length != 1 else '' }} · {{ items['insights']|length }} insight{{ 's' if items['insights']|length != 1 else '' }} · {{ items['concepts']|length }} concept{{ 's' if items['concepts']|length != 1 else '' }}
+      </div>
+    </div>
+
+    {# ── Concepts ── #}
+    {% if items['concepts'] %}
+    <div class="px-4 py-3 border-b border-border">
+      <p class="text-xs font-medium text-muted uppercase mb-2">🧩 Concepts</p>
+      <div class="space-y-2">
+        {% for idx, con in items['concepts'] %}
+        {% set la = la_concepts[idx] if la_concepts and idx < la_concepts|length else None %}
+        {% set default_act = la.default_action if la else 'accept_new' %}
+        <div class="item-row bucket-concepts p-3 bg-surface/40 rounded-md" data-bucket="concepts" data-index="{{ idx }}">
+          <div class="flex items-start gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-foreground text-sm">{{ con.concept }}</div>
+              {% if con.summary %}<div class="text-xs text-subtle mt-1">{{ con.summary }}</div>{% endif %}
+              {% if con.key_points %}
+              <ul class="list-disc ml-5 mt-1.5 text-xs text-subtle space-y-0.5">
+                {% for kp in con.key_points %}<li>{{ kp }}</li>{% endfor %}
+              </ul>
+              {% endif %}
+              <div class="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted">
+                {% if con.topic_tag %}<div><span class="text-muted">Topic:</span> <span class="text-foreground">{{ con.topic_tag }}</span></div>{% endif %}
+                {% if con.date %}<div><span class="text-muted">Date:</span> {{ con.date }}</div>{% endif %}
+              </div>
+            </div>
+            {% if la and la.best_match %}
+            <span class="shrink-0 text-xs px-2 py-0.5 rounded-full {{ 'bg-warning/20 text-warning border border-warning/40' if la.best_match.verdict == 'same' else 'bg-accent/10 text-accent border border-accent/30' }}">
+              {{ '⚠️ look-alike' if la.best_match.verdict == 'same' else '⯈ partial overlap' }} · {{ (la.best_match.confidence * 100)|int }}%
+            </span>
+            {% else %}
+            <span class="shrink-0 text-xs px-2 py-0.5 rounded-full bg-success/15 text-success border border-success/30">● new</span>
+            {% endif %}
+          </div>
+          {% if la and la.best_match %}
+          <div class="mt-2 ml-1 text-xs text-subtle">
+            Closest: <span class="text-foreground">{{ la.best_match.heading }}</span>
+            {% if la.best_match.rationale %}<div class="italic text-muted mt-0.5">{{ la.best_match.rationale }}</div>{% endif %}
+          </div>
+          {% endif %}
+          <div class="mt-2 ml-1 flex gap-3 text-xs">
+            <label class="cursor-pointer"><input type="radio" name="act-c-{{ idx }}" value="accept_new" class="act-radio" {{ 'checked' if default_act == 'accept_new' else '' }}> Add as new</label>
+            <label class="cursor-pointer"><input type="radio" name="act-c-{{ idx }}" value="skip" class="act-radio" {{ 'checked' if default_act == 'skip' else '' }}> Skip</label>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── Product Info ── #}
+    {% if items['products'] %}
+    <div class="px-4 py-3 border-b border-border">
+      <p class="text-xs font-medium text-muted uppercase mb-2">📦 Product Info</p>
+      <div class="space-y-2">
+        {% for idx, pr in items['products'] %}
+        {% set la = la_products[idx] if la_products and idx < la_products|length else None %}
+        {% set default_act = la.default_action if la else 'accept_new' %}
+        {% set merge_target = la.best_match.card_id if (la and la.best_match) else '' %}
+        {% set merge_heading = la.best_match.heading if (la and la.best_match) else '' %}
+        <div class="item-row bucket-products p-3 bg-surface/40 rounded-md" data-bucket="products" data-index="{{ idx }}">
+          <div class="flex items-start gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-foreground text-sm">{{ pr.claim }}</div>
+              <div class="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-subtle">
+                {% if pr.product %}<div><span class="text-muted">Product:</span> <span class="text-foreground font-medium">{{ pr.product }}</span></div>{% endif %}
+                {% if pr.fact_type %}<div><span class="text-muted">Type:</span> {{ pr.fact_type }}</div>{% endif %}
+                {% if pr.detail %}<div class="col-span-2"><span class="text-muted">Detail:</span> {{ pr.detail }}</div>{% endif %}
+                {% if pr.topic_tag %}<div><span class="text-muted">Topic:</span> {{ pr.topic_tag }}</div>{% endif %}
+                {% if pr.date %}<div><span class="text-muted">Date:</span> {{ pr.date }}</div>{% endif %}
+              </div>
+            </div>
+            {% if la and la.best_match %}
+            <span class="shrink-0 text-xs px-2 py-0.5 rounded-full {{ 'bg-warning/20 text-warning border border-warning/40' if la.best_match.verdict == 'same' else 'bg-accent/10 text-accent border border-accent/30' }}">
+              {{ '⚠️ look-alike' if la.best_match.verdict == 'same' else '⌈ partial overlap' }} · {{ (la.best_match.confidence * 100)|int }}%
+            </span>
+            {% else %}
+            <span class="shrink-0 text-xs px-2 py-0.5 rounded-full bg-success/15 text-success border border-success/30">● new</span>
+            {% endif %}
+          </div>
+          {% if la and la.best_match %}
+          <div class="mt-2 ml-1 text-xs text-subtle">
+            Closest: <span class="text-foreground">{{ la.best_match.heading }}</span>
+            {% if la.best_match.rationale %}<div class="italic text-muted mt-0.5">{{ la.best_match.rationale }}</div>{% endif %}
+          </div>
+          {% endif %}
+          <div class="mt-2 ml-1 flex flex-wrap gap-3 text-xs">
+            <label class="cursor-pointer"><input type="radio" name="act-p-{{ idx }}" value="accept_new" class="act-radio" {{ 'checked' if default_act == 'accept_new' else '' }}> Add as new</label>
+            {% if merge_target %}
+            <label class="cursor-pointer" title="Append this article's URL to '{{ merge_heading }}'"><input type="radio" name="act-p-{{ idx }}" value="merge:{{ merge_target }}" class="act-radio" {{ 'checked' if default_act.startswith('merge:') else '' }}> Merge sources → {{ merge_heading[:40] }}{% if merge_heading|length > 40 %}…{% endif %}</label>
+            {% endif %}
+            <label class="cursor-pointer"><input type="radio" name="act-p-{{ idx }}" value="skip" class="act-radio" {{ 'checked' if default_act == 'skip' else '' }}> Skip</label>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── Insights ── #}
+    {% if items['insights'] %}
+    <div class="px-4 py-3 border-b border-border">
+      <p class="text-xs font-medium text-muted uppercase mb-2">📊 Insights</p>
+      <div class="space-y-2">
+        {% for idx, ins in items['insights'] %}
+        {% set la = la_insights[idx] if la_insights and idx < la_insights|length else None %}
+        {% set default_act = la.default_action if la else 'accept_new' %}
+        {% set merge_target = la.best_match.card_id if (la and la.best_match) else '' %}
+        {% set merge_heading = la.best_match.heading if (la and la.best_match) else '' %}
+        <div class="item-row bucket-insights p-3 bg-surface/40 rounded-md" data-bucket="insights" data-index="{{ idx }}">
+          <div class="flex items-start gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-foreground text-sm">{{ ins.claim }}</div>
+              <div class="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-subtle">
+                {% if ins.number %}<div><span class="text-muted">Number:</span> <span class="text-foreground font-medium">{{ ins.number }}</span></div>{% endif %}
+                {% if ins.date %}<div><span class="text-muted">Date:</span> {{ ins.date }}</div>{% endif %}
+                {% if ins.topic_tag %}<div><span class="text-muted">Topic:</span> {{ ins.topic_tag }}</div>{% endif %}
+                {% if ins.source_title %}<div class="truncate" title="{{ ins.source_title }}"><span class="text-muted">Source title:</span> {{ ins.source_title }}</div>{% endif %}
+                {% if ins.context %}<div class="col-span-2 text-muted italic mt-0.5">{{ ins.context }}</div>{% endif %}
+              </div>
+            </div>
+            {% if la and la.best_match %}
+            <span class="shrink-0 text-xs px-2 py-0.5 rounded-full {{ 'bg-warning/20 text-warning border border-warning/40' if la.best_match.verdict == 'same' else 'bg-accent/10 text-accent border border-accent/30' }}">
+              {{ '⚠️ look-alike' if la.best_match.verdict == 'same' else '⯈ partial overlap' }} · {{ (la.best_match.confidence * 100)|int }}%
+            </span>
+            {% else %}
+            <span class="shrink-0 text-xs px-2 py-0.5 rounded-full bg-success/15 text-success border border-success/30">● new</span>
+            {% endif %}
+          </div>
+          {% if la and la.best_match %}
+          <div class="mt-2 ml-1 text-xs text-subtle">
+            Closest: <span class="text-foreground">{{ la.best_match.heading }}</span>
+            {% if la.best_match.rationale %}<div class="italic text-muted mt-0.5">{{ la.best_match.rationale }}</div>{% endif %}
+          </div>
+          {% endif %}
+          <div class="mt-2 ml-1 flex flex-wrap gap-3 text-xs">
+            <label class="cursor-pointer"><input type="radio" name="act-i-{{ idx }}" value="accept_new" class="act-radio" {{ 'checked' if default_act == 'accept_new' else '' }}> Add as new</label>
+            {% if merge_target %}
+            <label class="cursor-pointer" title="Append this article's URL to '{{ merge_heading }}'"><input type="radio" name="act-i-{{ idx }}" value="merge:{{ merge_target }}" class="act-radio" {{ 'checked' if default_act.startswith('merge:') else '' }}> Merge sources → {{ merge_heading[:40] }}{% if merge_heading|length > 40 %}…{% endif %}</label>
+            {% endif %}
+            <label class="cursor-pointer"><input type="radio" name="act-i-{{ idx }}" value="skip" class="act-radio" {{ 'checked' if default_act == 'skip' else '' }}> Skip</label>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── How-Tos ── #}
+    {% if items['howtos'] %}
+    <div class="px-4 py-3">
+      <p class="text-xs font-medium text-muted uppercase mb-2">🛠️ How-Tos</p>
+      <div class="space-y-2">
+        {% for idx, h in items['howtos'] %}
+        {% set la = la_howtos[idx] if la_howtos and idx < la_howtos|length else None %}
+        {% set default_act = la.default_action if la else 'accept_new' %}
+        <div class="item-row bucket-howtos p-3 bg-surface/40 rounded-md" data-bucket="howtos" data-index="{{ idx }}">
+          <div class="flex items-start gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-foreground text-sm">{{ h.title }}</div>
+              {% set verified = h.get('verified_steps', 0) %}
+              {% set total = h.get('total_steps', 0) %}
+              {% if total and verified < total %}
+              <div class="mt-1 text-[11px] text-warning">⚠️ {{ verified }}/{{ total }} steps quoted from source; rest are model-inferred</div>
+              {% endif %}
+              <ol class="list-decimal ml-5 mt-1.5 text-xs text-subtle space-y-0.5">
+                {% for step in h.get('steps', []) %}
+                  {% if step is string %}
+                  <li>{{ step }}</li>
+                  {% else %}
+                  <li>
+                    {{ step.get('text') or step.get('title', '') }}
+                    {% if step.get('verified') is false %}<span class="ml-1 text-[10px] uppercase text-warning">[unverified]</span>{% endif %}
+                  </li>
+                  {% endif %}
+                {% endfor %}
+              </ol>
+            </div>
+            {% if la and la.best_match %}
+            <span class="shrink-0 text-xs px-2 py-0.5 rounded-full {{ 'bg-warning/20 text-warning border border-warning/40' if la.best_match.verdict == 'same' else 'bg-accent/10 text-accent border border-accent/30' }}">
+              {{ '⚠️ look-alike' if la.best_match.verdict == 'same' else '⯈ partial overlap' }} · {{ (la.best_match.confidence * 100)|int }}%
+            </span>
+            {% else %}
+            <span class="shrink-0 text-xs px-2 py-0.5 rounded-full bg-success/15 text-success border border-success/30">● new</span>
+            {% endif %}
+          </div>
+          {% if la and la.best_match %}
+          <div class="mt-2 ml-1 text-xs text-subtle">
+            Closest: <span class="text-foreground">{{ la.best_match.heading }}</span>
+            {% if la.best_match.rationale %}<div class="italic text-muted mt-0.5">{{ la.best_match.rationale }}</div>{% endif %}
+          </div>
+          {% endif %}
+          <div class="mt-2 ml-1 flex gap-3 text-xs">
+            <label class="cursor-pointer"><input type="radio" name="act-h-{{ idx }}" value="accept_new" class="act-radio" {{ 'checked' if default_act == 'accept_new' else '' }}> Add as new</label>
+            <label class="cursor-pointer"><input type="radio" name="act-h-{{ idx }}" value="skip" class="act-radio" {{ 'checked' if default_act == 'skip' else '' }}> Skip</label>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <!-- Action Buttons -->
+  <div class="flex gap-3 pt-2">
+    <button onclick="applySelected()" id="btn-apply" class="px-5 py-2.5 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover transition">
+      Apply Selected
+    </button>
+    <button onclick="dismiss()" class="px-4 py-2 bg-surface text-foreground rounded-button text-sm border border-border hover:bg-surface-hover transition">
+      Dismiss All
+    </button>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  function setAll(state) {
+    // "Select all" = accept_new everywhere; "Clear all" = skip everywhere
+    const target = state ? 'accept_new' : 'skip';
+    document.querySelectorAll('.item-row').forEach(row => {
+      const want = row.querySelector(`.act-radio[value="${target}"]`);
+      if (want) want.checked = true;
+    });
+  }
+
+  async function applySelected() {
+    const actions = {howtos: {}, insights: {}, concepts: {}, products: {}};
+    document.querySelectorAll('.item-row').forEach(row => {
+      const bucket = row.dataset.bucket;
+      const idx = row.dataset.index;
+      const checked = row.querySelector('.act-radio:checked');
+      if (checked) actions[bucket][idx] = checked.value;
+    });
+
+    const btn = document.getElementById('btn-apply');
+    btn.disabled = true;
+    btn.textContent = 'Applying…';
+
+    const resp = await fetch("{{ url_for('source_of_truth.apply_changes', pu_id=pu.id) }}", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({actions})
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      window.location.href = "{{ url_for('source_of_truth.dashboard') }}";
+    } else {
+      btn.textContent = 'Error: ' + (data.error || 'Unknown');
+      btn.disabled = false;
+    }
+  }
+
+  async function dismiss() {
+    await fetch("{{ url_for('source_of_truth.dismiss_changes', pu_id=pu.id) }}", {method: 'POST'});
+    window.location.href = "{{ url_for('source_of_truth.dashboard') }}";
+  }
+</script>
+{% endblock %}
