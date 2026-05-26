@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Sources — Source of Truth{% endblock %}
+{% block content %}
+<div class="space-y-5">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <div>
+      <h1 class="text-2xl font-bold">Sources</h1>
+      <p class="text-sm text-muted mt-1">Every ingestion run and source tracked by the SOT review pipeline.</p>
+    </div>
+    <div class="flex gap-2 flex-wrap">
+      <a href="{{ url_for('source_of_truth.dashboard') }}" class="px-3 py-2 bg-surface text-foreground rounded-button text-sm border border-border hover:bg-surface-hover no-underline">← Dashboard</a>
+      <a href="{{ url_for('source_of_truth.ingest_form') }}" class="px-3 py-2 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover no-underline">+ Ingest Content</a>
+    </div>
+  </div>
+
+  <form method="get" class="bg-panel border border-border rounded-lg p-3 grid md:grid-cols-[1fr_auto_auto_auto] gap-2">
+    <input name="q" value="{{ q }}" placeholder="Search title or URL…" class="px-3 py-2 rounded-button bg-background border border-border text-foreground placeholder-muted focus:outline-none focus:border-accent" />
+    <select name="type" class="px-3 py-2 rounded-button bg-background border border-border text-foreground">
+      <option value="">All types</option>
+      {% for opt in type_options %}<option value="{{ opt }}" {% if opt == source_type %}selected{% endif %}>{{ opt }}</option>{% endfor %}
+    </select>
+    <select name="status" class="px-3 py-2 rounded-button bg-background border border-border text-foreground">
+      <option value="">All statuses</option>
+      {% for opt in status_options %}<option value="{{ opt }}" {% if opt == status %}selected{% endif %}>{{ opt }}</option>{% endfor %}
+    </select>
+    <button class="px-4 py-2 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover">Filter</button>
+  </form>
+
+  <div class="bg-panel border border-border rounded-lg overflow-hidden">
+    <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+      <div class="font-semibold">{{ sources|length }} source{{ '' if sources|length == 1 else 's' }}</div>
+      <div class="text-xs text-muted">Newest first</div>
+    </div>
+    {% if sources %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-surface text-muted">
+          <tr>
+            <th class="text-left font-medium px-4 py-2">Title / URL</th>
+            <th class="text-left font-medium px-4 py-2 whitespace-nowrap">Date ingested</th>
+            <th class="text-left font-medium px-4 py-2">Type</th>
+            <th class="text-left font-medium px-4 py-2">Last action</th>
+            <th class="text-right font-medium px-4 py-2 whitespace-nowrap">Extracted</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+          {% for s in sources %}
+          <tr class="hover:bg-surface-hover">
+            <td class="px-4 py-3 align-top max-w-xl">
+              <a href="{{ url_for('source_of_truth.source_detail', pu_id=s.pending_id, source_key=s.source_key) }}" class="font-medium text-foreground hover:text-accent no-underline line-clamp-2">{{ s.title }}</a>
+              {% if s.url %}<a href="{{ s.url }}" target="_blank" class="block text-xs text-accent truncate no-underline mt-1">{{ s.url }}</a>{% else %}<div class="text-xs text-muted truncate mt-1">{{ s.source_id }}</div>{% endif %}
+              {% if s.error %}<div class="text-xs text-danger mt-1">{{ s.error }}</div>{% endif %}
+            </td>
+            <td class="px-4 py-3 align-top text-muted whitespace-nowrap">{{ s.created_at|timeago if s.created_at else '—' }}</td>
+            <td class="px-4 py-3 align-top"><span class="px-2 py-1 rounded-full bg-surface border border-border text-xs">{{ s.source_type }}</span></td>
+            <td class="px-4 py-3 align-top"><span class="px-2 py-1 rounded-full text-xs {% if s.status == 'applied' or s.status == 'ok' %}bg-success/10 text-success{% elif s.status == 'pending' or s.status == 'extracting' %}bg-warning/10 text-warning{% elif 'error' in s.status %}bg-danger/10 text-danger{% else %}bg-surface text-muted{% endif %}">{{ s.status }}</span></td>
+            <td class="px-4 py-3 align-top text-right whitespace-nowrap text-muted">
+              {{ s.counts.insights|default(0) }} I · {{ s.counts.concepts|default(0) }} C · {{ s.counts.products|default(0) }} P · {{ s.counts.howtos|default(0) }} H
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-12 text-center text-muted">No sources match those filters.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
