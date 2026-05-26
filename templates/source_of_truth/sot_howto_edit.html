@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}{{ 'New Guide' if is_new else 'Edit: ' + howto.title }} — Source of Truth{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center gap-2 text-sm text-muted">
+    <a href="{{ url_for('source_of_truth.dashboard') }}" class="hover:text-foreground no-underline">Source of Truth</a>
+    <span>/</span>
+    <a href="{{ url_for('source_of_truth.howto_list') }}" class="hover:text-foreground no-underline">How-Tos</a>
+    <span>/</span>
+    <span class="text-foreground">{{ 'New Guide' if is_new else 'Edit' }}</span>
+  </div>
+
+  <h1 class="text-2xl font-bold">{{ 'New How-To Guide' if is_new else 'Edit: ' + howto.title }}</h1>
+
+  <div class="bg-panel rounded-lg border border-border p-4 space-y-4">
+    <div>
+      <label class="block text-sm font-medium mb-1">Title</label>
+      <input type="text" id="ht-title" value="{{ '' if is_new else howto.title }}"
+             class="w-full px-3 py-2 bg-surface border border-border rounded-md text-foreground focus:outline-none focus:border-border-focus">
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1">Description (optional)</label>
+      <input type="text" id="ht-desc" value="{{ '' if is_new else howto.description }}" placeholder="Brief summary of what this guide covers"
+             class="w-full px-3 py-2 bg-surface border border-border rounded-md text-foreground focus:outline-none focus:border-border-focus">
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1">Prerequisites (optional)</label>
+      <input type="text" id="ht-prereqs" value="{{ '' if is_new else howto.prerequisites }}" placeholder="What the user needs before starting"
+             class="w-full px-3 py-2 bg-surface border border-border rounded-md text-foreground focus:outline-none focus:border-border-focus">
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1">Tags (comma-separated, optional)</label>
+      <input type="text" id="ht-tags" value="{{ '' if is_new else (howto.tags or [])|join(', ') }}" placeholder="onboarding, admin, api"
+             class="w-full px-3 py-2 bg-surface border border-border rounded-md text-foreground focus:outline-none focus:border-border-focus">
+    </div>
+
+    <div>
+      <div class="flex items-center justify-between mb-2">
+        <label class="text-sm font-medium">Steps</label>
+        <button onclick="addStep()" class="text-sm text-accent hover:text-accent-hover">+ Add Step</button>
+      </div>
+      <div id="steps-container" class="space-y-2"></div>
+    </div>
+
+    <div class="flex gap-2 pt-2">
+      <button onclick="saveHowTo()" id="btn-save" class="px-4 py-2 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover transition">
+        {{ 'Create Guide' if is_new else 'Save to GitHub' }}
+      </button>
+      <a href="{{ url_for('source_of_truth.howto_list') if is_new else url_for('source_of_truth.howto_view', path=howto.path) }}"
+         class="px-4 py-2 bg-surface text-foreground rounded-button text-sm border border-border hover:bg-surface-hover transition no-underline">Cancel</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  let stepCount = 0;
+
+  function addStep(title = '', description = '') {
+    stepCount++;
+    const div = document.createElement('div');
+    div.className = 'flex gap-2 items-start step-row';
+    div.innerHTML = `
+      <span class="flex-shrink-0 w-7 h-7 bg-element rounded-full flex items-center justify-center text-xs font-medium mt-1 step-num">${stepCount}</span>
+      <div class="flex-1 space-y-1">
+        <input type="text" class="step-title w-full px-3 py-1.5 bg-surface border border-border rounded-md text-foreground text-sm focus:outline-none focus:border-border-focus" placeholder="Step title" value="${title.replace(/"/g, '&quot;')}">
+        <textarea class="step-desc w-full px-3 py-1.5 bg-surface border border-border rounded-md text-foreground text-sm focus:outline-none focus:border-border-focus resize-y" rows="2" placeholder="Description (optional)">${description}</textarea>
+      </div>
+      <button onclick="removeStep(this)" class="text-muted hover:text-error mt-1 text-lg">&times;</button>
+    `;
+    document.getElementById('steps-container').appendChild(div);
+  }
+
+  function removeStep(btn) {
+    btn.closest('.step-row').remove();
+    renumberSteps();
+  }
+
+  function renumberSteps() {
+    document.querySelectorAll('.step-num').forEach((el, i) => el.textContent = i + 1);
+    stepCount = document.querySelectorAll('.step-row').length;
+  }
+
+  async function saveHowTo() {
+    const title = document.getElementById('ht-title').value.trim();
+    if (!title) { alert('Title is required'); return; }
+
+    const steps = [];
+    document.querySelectorAll('.step-row').forEach(row => {
+      steps.push({
+        title: row.querySelector('.step-title').value.trim(),
+        description: row.querySelector('.step-desc').value.trim()
+      });
+    });
+
+    const tags = document.getElementById('ht-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+
+    const body = {
+      title,
+      description: document.getElementById('ht-desc').value.trim(),
+      prerequisites: document.getElementById('ht-prereqs').value.trim(),
+      steps,
+      tags
+    };
+
+    const btn = document.getElementById('btn-save');
+    btn.disabled = true;
+    btn.textContent = 'Saving to GitHub…';
+
+    const isNew = {{ 'true' if is_new else 'false' }};
+    const url = isNew
+      ? "{{ url_for('source_of_truth.howto_new') }}"
+      : "{{ url_for('source_of_truth.howto_edit', path=howto.path if howto else '_') }}";
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json();
+    if (data.path) {
+      window.location.href = "{{ url_for('source_of_truth.howto_view', path='__PATH__') }}".replace('__PATH__', data.path);
+    } else if (data.ok) {
+      window.location.href = "{{ url_for('source_of_truth.howto_view', path=howto.path if howto else '_') }}";
+    } else {
+      btn.textContent = 'Error: ' + (data.error || 'Unknown');
+      btn.disabled = false;
+    }
+  }
+
+  {% if not is_new and howto and howto.steps %}
+  {% for step in howto.steps %}
+  addStep({{ (step.title if step is mapping else step)|tojson }}, {{ (step.description if step is mapping else '')|tojson }});
+  {% endfor %}
+  {% else %}
+  addStep();
+  {% endif %}
+</script>
+{% endblock %}
