@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% block title %}Ingest Content — Source of Truth{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center gap-2 text-sm text-muted">
+    <a href="{{ url_for('source_of_truth.dashboard') }}" class="hover:text-foreground no-underline">Source of Truth</a>
+    <span>/</span>
+    <span class="text-foreground">Ingest Content</span>
+  </div>
+
+  <div>
+    <h1 class="text-2xl font-bold">Ingest Content</h1>
+    <p class="text-sm text-muted mt-1">URLs, files (.md / .docx / .pdf), or raw text — AI extracts Ahrefs how-tos + quotable insights.</p>
+  </div>
+
+  <!-- Input Tabs -->
+  <div class="bg-panel rounded-lg border border-border">
+    <div class="flex border-b border-border">
+      <button onclick="switchTab('bulk_urls')" id="tab-bulk_urls" class="px-4 py-2.5 text-sm font-medium border-b-2 border-accent text-foreground">URLs (up to 10)</button>
+      <button onclick="switchTab('files')" id="tab-files" class="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted hover:text-foreground">Files (up to 10)</button>
+      <button onclick="switchTab('url')" id="tab-url" class="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted hover:text-foreground">Single URL</button>
+      <button onclick="switchTab('text')" id="tab-text" class="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted hover:text-foreground">Raw Text</button>
+    </div>
+    <div class="p-4 space-y-4">
+
+      <!-- Bulk URL Input (default) -->
+      <div id="input-bulk_urls">
+        <label class="block text-sm font-medium text-foreground mb-1">URLs (one per line, up to 10)</label>
+        <textarea id="bulk-urls-content" rows="10" placeholder="https://ahrefs.com/blog/post-one&#10;https://ahrefs.com/blog/post-two&#10;..."
+                  class="w-full px-3 py-2 bg-surface border border-border rounded-md text-foreground text-sm font-mono focus:outline-none focus:border-border-focus resize-y"
+                  oninput="updateUrlCount()"></textarea>
+        <p class="text-xs text-muted mt-1"><span id="url-count">0</span> / 10 URLs · processed serially, ~10–20s per URL</p>
+      </div>
+
+      <!-- Files -->
+      <div id="input-files" class="hidden space-y-3">
+        <label for="file-picker" id="drop-zone"
+               class="block border-2 border-dashed border-border rounded-md p-6 text-center cursor-pointer hover:bg-surface-hover transition">
+          <p class="text-sm font-medium text-foreground">Drop files here or click to pick</p>
+          <p class="text-xs text-muted mt-1">.md · .docx · .pdf · up to 10 files, 10 MB total (per platform limit)</p>
+          <input id="file-picker" type="file" multiple accept=".md,.markdown,.txt,.docx,.pdf" class="hidden">
+        </label>
+        <ul id="file-list" class="text-sm text-subtle space-y-1"></ul>
+        <div>
+          <label class="block text-sm font-medium text-foreground mb-1">Source note <span class="text-muted font-normal">(optional)</span></label>
+          <input id="file-note" type="text" maxlength="200" placeholder="e.g. internal Q1 SEO report, decay study draft"
+                 class="w-full px-3 py-2 bg-surface border border-border rounded-md text-foreground text-sm focus:outline-none focus:border-border-focus">
+          <p class="text-xs text-muted mt-1">Shown as the source label on every extracted insight/how-to.</p>
+        </div>
+      </div>
+
+      <!-- Single URL -->
+      <div id="input-url" class="hidden">
+        <input type="url" id="url-content" placeholder="https://ahrefs.com/blog/..."
+               class="w-full px-3 py-2 bg-surface border border-border rounded-md text-foreground text-sm focus:outline-none focus:border-border-focus">
+        <p class="text-xs text-muted mt-1">Ahrefs blog posts, studies, or product documentation.</p>
+      </div>
+
+      <!-- Raw Text -->
+      <div id="input-text" class="hidden">
+        <textarea id="text-content" rows="12" placeholder="Paste an article body, study summary, or any text with quotable facts…"
+                  class="w-full px-3 py-2 bg-surface border border-border rounded-md text-foreground text-sm focus:outline-none focus:border-border-focus resize-y"></textarea>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button onclick="startIngest()" id="btn-ingest"
+                class="px-4 py-2 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover transition">
+          Extract Facts
+        </button>
+        <div id="status-msg" class="text-sm text-muted hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div id="progress-panel" class="hidden bg-panel rounded-lg border border-border p-6">
+    <div class="flex items-center gap-3">
+      <div class="animate-spin w-5 h-5 border-2 border-accent border-t-transparent rounded-full"></div>
+      <div class="flex-1">
+        <p class="font-medium" id="progress-title">Extracting…</p>
+        <p class="text-sm text-muted" id="progress-sub">Starting up.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  let currentTab = 'bulk_urls';
+  let pickedFiles = [];
+
+  function switchTab(tab) {
+    currentTab = tab;
+    ['bulk_urls', 'files', 'url', 'text'].forEach(t => {
+      document.getElementById('input-' + t).classList.toggle('hidden', t !== tab);
+      const btn = document.getElementById('tab-' + t);
+      btn.classList.toggle('border-accent', t === tab);
+      btn.classList.toggle('border-transparent', t !== tab);
+      btn.classList.toggle('text-foreground', t === tab);
+      btn.classList.toggle('text-muted', t !== tab);
+    });
+  }
+
+  function updateUrlCount() {
+    const ta = document.getElementById('bulk-urls-content');
+    const urls = ta.value.split('\n').map(l => l.trim()).filter(Boolean);
+    document.getElementById('url-count').textContent = urls.length;
+    document.getElementById('url-count').style.color = urls.length > 10 ? '#ef4444' : '';
+  }
+
+  // File picker + drag-drop
+  const picker = document.getElementById('file-picker');
+  const dropZone = document.getElementById('drop-zone');
+  const fileListEl = document.getElementById('file-list');
+
+  function renderFiles() {
+    fileListEl.innerHTML = '';
+    pickedFiles.forEach((f, i) => {
+      const li = document.createElement('li');
+      li.className = 'flex items-center justify-between bg-surface/40 px-3 py-1.5 rounded-md';
+      const kb = (f.size / 1024).toFixed(1);
+      li.innerHTML = `<span class="truncate text-foreground">${f.name} <span class="text-muted">(${kb} KB)</span></span>`;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = '✕';
+      btn.className = 'text-muted hover:text-foreground ml-3';
+      btn.onclick = () => { pickedFiles.splice(i, 1); renderFiles(); };
+      li.appendChild(btn);
+      fileListEl.appendChild(li);
+    });
+  }
+
+  function addFiles(fileList) {
+    Array.from(fileList).forEach(f => {
+      if (pickedFiles.length >= 10) return;
+      // dedupe by name+size
+      if (pickedFiles.some(p => p.name === f.name && p.size === f.size)) return;
+      pickedFiles.push(f);
+    });
+    renderFiles();
+  }
+
+  picker.addEventListener('change', e => addFiles(e.target.files));
+  ['dragover', 'dragenter'].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault();
+    dropZone.classList.add('bg-surface-hover');
+  }));
+  ['dragleave', 'drop'].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault();
+    dropZone.classList.remove('bg-surface-hover');
+  }));
+  dropZone.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+
+  async function startIngest() {
+    const type = currentTab;
+    const btn = document.getElementById('btn-ingest');
+    btn.disabled = true;
+    btn.textContent = 'Processing…';
+    document.getElementById('progress-panel').classList.remove('hidden');
+
+    try {
+      let resp;
+      if (type === 'files') {
+        if (!pickedFiles.length) { reset('Pick at least one file'); return; }
+        if (pickedFiles.length > 10) { reset('Max 10 files'); return; }
+        const totalBytes = pickedFiles.reduce((s, f) => s + f.size, 0);
+        const MAX_BYTES = 10 * 1024 * 1024; // 10 MB to stay under nginx 12MB ceiling
+        if (totalBytes > MAX_BYTES) {
+          const mb = (totalBytes / 1024 / 1024).toFixed(1);
+          reset(`Total upload is ${mb} MB — max is 10 MB. Pick fewer / smaller files.`);
+          return;
+        }
+        const fd = new FormData();
+        pickedFiles.forEach(f => fd.append('files', f));
+        const note = document.getElementById('file-note').value.trim();
+        if (note) fd.append('note', note);
+        resp = await fetch("{{ url_for('source_of_truth.api_ingest_files') }}", {method: 'POST', body: fd});
+      } else {
+        let body;
+        if (type === 'bulk_urls') {
+          const urls = document.getElementById('bulk-urls-content').value
+                       .split('\n').map(l => l.trim()).filter(Boolean);
+          if (!urls.length) { reset('Add at least one URL'); return; }
+          if (urls.length > 10) { reset('Max 10 URLs'); return; }
+          body = {type: 'bulk_urls', urls};
+        } else if (type === 'url') {
+          const content = document.getElementById('url-content').value.trim();
+          if (!content) { reset('Enter a URL'); return; }
+          body = {type: 'url', content};
+        } else {
+          const content = document.getElementById('text-content').value.trim();
+          if (!content) { reset('Paste some text'); return; }
+          body = {type: 'text', content};
+        }
+        resp = await fetch("{{ url_for('source_of_truth.api_ingest') }}", {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body)
+        });
+      }
+      // Robust parse: server might return HTML on 413 / 502 / 500
+      const ctype = (resp.headers.get('content-type') || '').toLowerCase();
+      let data;
+      if (ctype.includes('application/json')) {
+        data = await resp.json();
+      } else {
+        const text = await resp.text();
+        if (resp.status === 413) throw new Error('Upload too large — the platform caps requests at ~10 MB. Pick smaller files or split the batch.');
+        if (resp.status === 502 || resp.status === 504) throw new Error('Server timeout. Try again, or split into smaller batches.');
+        throw new Error(`Server returned HTTP ${resp.status} (not JSON). First 200 chars: ${text.slice(0,200)}`);
+      }
+      if (data.error) throw new Error(data.error);
+
+      const jobId = data.job_id;
+      const pendingId = data.pending_id;
+      const poll = setInterval(async () => {
+        const sr = await fetch(`{{ url_for('source_of_truth.ingest_status', job_id='__JOB__') }}`.replace('__JOB__', jobId));
+        const sdata = await sr.json();
+        if (sdata.status === 'done') {
+          clearInterval(poll);
+          window.location.href = `{{ url_for('source_of_truth.review', pu_id=0) }}`.replace('0', pendingId);
+        } else if (sdata.status === 'error') {
+          clearInterval(poll);
+          reset(sdata.error || 'Something went wrong');
+        } else if (sdata.phase) {
+          document.getElementById('progress-title').textContent = 'Extracting…';
+          document.getElementById('progress-sub').textContent = sdata.phase;
+        }
+      }, 2000);
+    } catch (e) {
+      reset(e.message);
+    }
+  }
+
+  function reset(msg) {
+    document.getElementById('progress-title').textContent = 'Error';
+    document.getElementById('progress-sub').textContent = msg;
+    document.getElementById('btn-ingest').disabled = false;
+    document.getElementById('btn-ingest').textContent = 'Extract Facts';
+  }
+</script>
+{% endblock %}
