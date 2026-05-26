@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{{ howto.title }} — Source of Truth{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center gap-2 text-sm text-muted">
+    <a href="{{ url_for('source_of_truth.dashboard') }}" class="hover:text-foreground no-underline">Source of Truth</a>
+    <span>/</span>
+    <a href="{{ url_for('source_of_truth.howto_list') }}" class="hover:text-foreground no-underline">How-Tos</a>
+    <span>/</span>
+    <span class="text-foreground">{{ howto.title }}</span>
+  </div>
+
+  <div class="flex items-start justify-between">
+    <div>
+      <h1 class="text-2xl font-bold">{{ howto.title }}</h1>
+      {% if howto.description %}
+      <p class="text-sm text-muted mt-1">{{ howto.description }}</p>
+      {% endif %}
+      {% if howto.tags %}
+      <div class="flex gap-1.5 mt-2">
+        {% for tag in howto.tags %}
+        <span class="px-2 py-0.5 bg-element rounded-pill text-xs text-subtle">{{ tag }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="flex gap-2">
+      <a href="{{ url_for('source_of_truth.howto_edit', path=howto.path) }}" class="px-3 py-1.5 bg-surface text-foreground rounded-button text-sm border border-border hover:bg-surface-hover transition no-underline">Edit</a>
+      <a href="{{ "https://github.com/" + repo + "/blob/main/" if repo else "" }}{{ howto.path }}" target="_blank" class="px-3 py-1.5 bg-surface text-subtle rounded-button text-sm border border-border hover:bg-surface-hover transition no-underline">GitHub ↗</a>
+      <form method="POST" action="{{ url_for('source_of_truth.howto_delete', path=howto.path) }}" onsubmit="return confirm('Delete this guide from GitHub?')">
+        <button type="submit" class="px-3 py-1.5 bg-surface text-error rounded-button text-sm border border-border hover:bg-surface-hover transition">Delete</button>
+      </form>
+    </div>
+  </div>
+
+  {% if howto.prerequisites %}
+  <div class="bg-surface rounded-lg border border-border p-4">
+    <h3 class="text-sm font-semibold text-muted uppercase mb-2">Prerequisites</h3>
+    <p class="text-sm">{{ howto.prerequisites }}</p>
+  </div>
+  {% endif %}
+
+  <div class="bg-panel rounded-lg border border-border">
+    <div class="px-4 py-3 border-b border-border">
+      <h2 class="text-base font-semibold">Steps</h2>
+    </div>
+    <div class="divide-y divide-border">
+      {% for step in howto.steps %}
+      <div class="px-4 py-4 flex gap-4">
+        <div class="flex-shrink-0 w-8 h-8 bg-accent/10 text-accent rounded-full flex items-center justify-center text-sm font-bold">
+          {{ loop.index }}
+        </div>
+        <div class="flex-1">
+          <h3 class="font-medium">{{ step.title if step is mapping else step }}</h3>
+          {% if step is mapping and step.description %}
+          <p class="text-sm text-muted mt-1">{{ step.description }}</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
