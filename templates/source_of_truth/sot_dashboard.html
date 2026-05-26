@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Source of Truth{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <!-- Header -->
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <div>
+      <h1 class="text-2xl font-bold">Source of Truth</h1>
+      <p class="text-sm text-muted mt-1">Team knowledge base &middot; <code class="text-xs">{{ repo or "—" }}</code></p>
+    </div>
+    <div class="flex gap-2 flex-wrap">
+      <a href="{{ url_for('source_of_truth.ingest_form') }}" class="px-4 py-2 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover transition no-underline">+ Ingest Content</a>
+      <a href="{{ url_for('source_of_truth.sources_view') }}" class="px-3 py-2 bg-surface text-foreground rounded-button text-sm font-medium border border-border hover:bg-surface-hover transition no-underline">Sources</a>
+      <a href="{{ url_for('source_of_truth.insights_view') }}" class="px-3 py-2 bg-surface text-foreground rounded-button text-sm font-medium border border-border hover:bg-surface-hover transition no-underline">All Insights</a>
+      <a href="{{ url_for('source_of_truth.concepts_view') }}" class="px-3 py-2 bg-surface text-foreground rounded-button text-sm font-medium border border-border hover:bg-surface-hover transition no-underline">All Concepts</a>
+      <a href="{{ url_for('source_of_truth.products_view') }}" class="px-3 py-2 bg-surface text-foreground rounded-button text-sm font-medium border border-border hover:bg-surface-hover transition no-underline">All Product Info</a>
+      <a href="{{ url_for('source_of_truth.howto_list') }}" class="px-3 py-2 bg-surface text-foreground rounded-button text-sm font-medium border border-border hover:bg-surface-hover transition no-underline">All How-Tos</a>
+      <button onclick="rebuildIndex()" id="btn-reindex" class="px-3 py-2 bg-surface text-subtle rounded-button text-sm border border-border hover:bg-surface-hover transition" title="Rebuild index from GitHub">⟳ Reindex</button>
+    </div>
+  </div>
+
+  <!-- Quick search -->
+  <form action="{{ url_for('source_of_truth.search_page') }}" method="get"
+        class="bg-surface border border-border rounded-card p-3 flex gap-2">
+    <input name="q" type="text" placeholder="Search pages and how-tos… (hybrid keyword + semantic)"
+           class="flex-1 px-3 py-2 rounded-button bg-background border border-border text-foreground placeholder-muted focus:outline-none focus:border-accent transition" />
+    <button type="submit"
+            class="px-4 py-2 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover transition">Search</button>
+  </form>
+
+  {% if pending %}
+  <div class="bg-warning/10 border border-warning/30 rounded-lg p-4">
+    <div class="flex items-center gap-2 mb-2">
+      <svg class="w-5 h-5 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+      <span class="font-medium text-warning">{{ pending|length }} pending extraction{{ 's' if pending|length > 1 else '' }} awaiting review</span>
+    </div>
+    <div class="space-y-1">
+      {% for p in pending %}
+      <a href="{{ url_for('source_of_truth.review', pu_id=p.id) }}" class="block text-sm text-subtle hover:text-foreground no-underline">
+        {% if p.status == 'extracting' %}
+        <span class="inline-block w-2 h-2 rounded-full bg-accent animate-pulse mr-1"></span> Extracting from {{ p.source_type }}...
+        {% else %}
+        <span class="inline-block w-2 h-2 rounded-full bg-warning mr-1"></span> Review extraction from {{ p.source_type }} ({{ p.created_at|timeago }})
+        {% endif %}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Three-column overview -->
+  <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+
+    <!-- Insights -->
+    <div class="bg-panel rounded-lg border border-border">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+        <h2 class="text-base font-semibold">📊 Insights &amp; Stats</h2>
+        <span class="text-xs text-muted">{{ insights_count }} total</span>
+      </div>
+      {% if recent_insights %}
+      <div class="divide-y divide-border">
+        {% for card in recent_insights %}
+        <a href="{{ url_for('source_of_truth.insights_view') }}" class="block px-4 py-3 hover:bg-surface-hover transition no-underline">
+          <div class="text-sm text-foreground line-clamp-2">{{ card.split('\n')[0]|replace('### ', '') }}</div>
+        </a>
+        {% endfor %}
+      </div>
+      <div class="px-4 py-2 border-t border-border">
+        <a href="{{ url_for('source_of_truth.insights_view') }}" class="text-sm text-accent hover:text-accent-hover no-underline">View all →</a>
+      </div>
+      {% else %}
+      <div class="px-4 py-6 text-sm text-muted text-center">No insights yet.</div>
+      {% endif %}
+    </div>
+
+    <!-- Concepts -->
+    <div class="bg-panel rounded-lg border border-border">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+        <h2 class="text-base font-semibold">🧩 Concepts &amp; Mechanisms</h2>
+        <span class="text-xs text-muted">{{ concepts_count }} total</span>
+      </div>
+      {% if recent_concepts %}
+      <div class="divide-y divide-border">
+        {% for card in recent_concepts %}
+        <a href="{{ url_for('source_of_truth.concepts_view') }}" class="block px-4 py-3 hover:bg-surface-hover transition no-underline">
+          <div class="text-sm text-foreground line-clamp-2">{{ card.split('\n')[0]|replace('### ', '') }}</div>
+        </a>
+        {% endfor %}
+      </div>
+      <div class="px-4 py-2 border-t border-border">
+        <a href="{{ url_for('source_of_truth.concepts_view') }}" class="text-sm text-accent hover:text-accent-hover no-underline">View all →</a>
+      </div>
+      {% else %}
+      <div class="px-4 py-6 text-sm text-muted text-center">No concepts yet. Try ingesting an explainer article.</div>
+      {% endif %}
+    </div>
+
+    <!-- Product Info -->
+    <div class="bg-panel rounded-lg border border-border">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+        <h2 class="text-base font-semibold">📦 Product Info</h2>
+        <span class="text-xs text-muted">{{ products_count }} total</span>
+      </div>
+      {% if recent_products %}
+      <div class="divide-y divide-border">
+        {% for card in recent_products %}
+        <a href="{{ url_for('source_of_truth.products_view') }}" class="block px-4 py-3 hover:bg-surface-hover transition no-underline">
+          <div class="text-sm text-foreground line-clamp-2">{{ card.split('\n')[0]|replace('### ', '') }}</div>
+        </a>
+        {% endfor %}
+      </div>
+      <div class="px-4 py-2 border-t border-border">
+        <a href="{{ url_for('source_of_truth.products_view') }}" class="text-sm text-accent hover:text-accent-hover no-underline">View all →</a>
+      </div>
+      {% else %}
+      <div class="px-4 py-6 text-sm text-muted text-center">No product facts yet. Ingest a product page or release note.</div>
+      {% endif %}
+    </div>
+
+    <!-- How-Tos -->
+    <div class="bg-panel rounded-lg border border-border">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+        <h2 class="text-base font-semibold">🛠️ Ahrefs How-Tos</h2>
+        <span class="text-xs text-muted">{{ howtos|length }} total</span>
+      </div>
+      {% if howtos %}
+      <div class="divide-y divide-border">
+        {% for h in howtos[:5] %}
+        <a href="{{ url_for('source_of_truth.howto_view', path=h.path) }}" class="block px-4 py-3 hover:bg-surface-hover transition no-underline">
+          <div class="font-medium text-foreground text-sm line-clamp-2">{{ h.title }}</div>
+        </a>
+        {% endfor %}
+      </div>
+      {% if howtos|length > 5 %}
+      <div class="px-4 py-2 border-t border-border">
+        <a href="{{ url_for('source_of_truth.howto_list') }}" class="text-sm text-accent hover:text-accent-hover no-underline">View all →</a>
+      </div>
+      {% endif %}
+      {% else %}
+      <div class="px-4 py-6 text-sm text-muted text-center">No how-tos yet.</div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function rebuildIndex() {
+  const btn = document.getElementById('btn-reindex');
+  btn.disabled = true;
+  btn.textContent = 'Reindexing...';
+  const resp = await fetch("{{ url_for('source_of_truth.api_rebuild_index') }}", {method:'POST'});
+  const data = await resp.json();
+  const poll = setInterval(async () => {
+    const sr = await fetch(`{{ url_for('source_of_truth.job_status', job_id='__JOB__') }}`.replace('__JOB__', data.job_id));
+    const s = await sr.json();
+    if (s.status === 'done') { clearInterval(poll); location.reload(); }
+    else if (s.status === 'error') { clearInterval(poll); btn.textContent = 'Error'; alert(s.error); }
+  }, 2000);
+}
+</script>
+{% endblock %}
