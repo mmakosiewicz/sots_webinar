@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}How-To Guides — Source of Truth{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center gap-2 text-sm text-muted">
+    <a href="{{ url_for('source_of_truth.dashboard') }}" class="hover:text-foreground no-underline">Source of Truth</a>
+    <span>/</span>
+    <span class="text-foreground">How-To Guides</span>
+  </div>
+
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold">How-To Guides</h1>
+      <p class="text-sm text-muted mt-1">Step-by-step guides for your product</p>
+    </div>
+    <a href="{{ url_for('source_of_truth.howto_new') }}" class="px-4 py-2 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover transition no-underline">+ New Guide</a>
+  </div>
+
+  {% if howtos %}
+  <div class="grid gap-3">
+    {% for h in howtos %}
+    <a href="{{ url_for('source_of_truth.howto_view', path=h.path) }}" class="block bg-panel rounded-lg border border-border p-4 hover:bg-surface-hover transition no-underline">
+      <div class="flex items-center justify-between mb-1">
+        <h3 class="font-medium text-foreground">{{ h.title }}</h3>
+        <span class="text-xs text-muted font-mono">{{ h.path }}</span>
+      </div>
+      {% if h.summary %}
+      <p class="text-sm text-muted">{{ h.summary }}</p>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="bg-panel rounded-lg border border-border p-12 text-center">
+    <svg class="w-12 h-12 mx-auto text-muted mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+    <h3 class="text-lg font-medium mb-2">No guides yet</h3>
+    <p class="text-muted text-sm mb-4">Create step-by-step how-to guides for your product.</p>
+    <a href="{{ url_for('source_of_truth.howto_new') }}" class="px-4 py-2 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover transition inline-block no-underline">+ New Guide</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
