@@ -39,6 +39,8 @@ llm = OpenAI(
     api_key=os.environ.get("OPENAI_API_KEY", "unused"),
 )
 LLM_MODEL = os.environ.get("SOT_EXTRACT_MODEL", "anthropic/claude-sonnet-4.5")
+# Brand name used to focus the extraction prompt. If unset, the prompt becomes domain-neutral.
+BRAND_NAME = os.environ.get("SOT_BRAND_NAME", "").strip()
 
 _jobs = {}
 _jobs_lock = threading.Lock()
@@ -623,48 +625,74 @@ def job_status(job_id):
 
 # ── Ingest + LLM extraction ────────────────────────────────────
 
-EXTRACT_SYSTEM = """You are an Ahrefs knowledge curator. Read the source content and extract ONLY three kinds of items:
+def _build_extract_system(brand_name: str) -> str:
+    """Compose the extraction prompt, optionally focused on a specific brand.
 
-1. AHREFS HOW-TOS — step-by-step procedures that explicitly use an Ahrefs product or feature.
-   - STRICT FILTER 1 (product mention): step 1 MUST name an Ahrefs product or feature (Site Explorer, Keywords Explorer, Site Audit, Rank Tracker, Brand Radar, AI Content Helper, Content Explorer, Web Analytics, Top Pages report, Best by Links, etc.).
+    If `brand_name` is empty, the prompt is brand-neutral: HOW-TOS can name any product,
+    PRODUCT INFO accepts any named product/feature.
+
+    If `brand_name` is set (e.g. "Acme"), the prompt requires HOW-TOS and PRODUCT INFO
+    to be scoped to that brand's products — generic procedures and competitor mentions
+    get filtered out. This makes extraction much sharper at the cost of being brand-specific.
+    """
+    b = brand_name or ""
+    has_brand = bool(b)
+    # Pick the right indefinite article for the brand name ("an Acme" vs "a Foo").
+    article = "an" if has_brand and b[:1].lower() in "aeiou" else "a"
+    # "uses an Acme product" vs "uses any product"
+    uses_phrase = f"{article} {b} product or feature" if has_brand else "any product or feature"
+    # "facts about a specific Acme product" vs "facts about a specific product"
+    label_phrase = f"a specific {b} product or feature" if has_brand else "a specific product or feature"
+    # "step 1 MUST name an Acme product" vs "step 1 MUST name a product or feature"
+    name_phrase = f"{article} {b} product or feature" if has_brand else "a product or feature"
+    skip_clause = (
+        f"   - If the source describes a generic process that does NOT name {article} {b} product, SKIP IT. Do NOT re-frame.\n"
+        if has_brand else ""
+    )
+    # Scope for product-info bucket (used in PRODUCT INFO bullet)
+    products_scope = uses_phrase
+
+    return f"""You are a knowledge curator. Read the source content and extract ONLY four kinds of items:
+
+1. HOW-TOS — step-by-step procedures that explicitly use {uses_phrase}.
+   - STRICT FILTER 1 (product mention): step 1 MUST name {name_phrase}.
    - STRICT FILTER 2 (procedural source): the SOURCE TEXT must actually contain a procedure — a numbered list, sequential 'first/then/next/finally', a labeled 'Step 1/Step 2', or a screenshot walkthrough described in text. A NAME-DROP IS NOT A HOW-TO.
-   - STRICT FILTER 3 (extractive, not generative): each step must be supported by a quote from the source text. If the article only says "you can find decaying content in Site Explorer" without explaining HOW, DO NOT invent the steps from your background knowledge. Return zero how-tos for that chunk.
-   - If the source describes a generic SEO process that DOESN'T name an Ahrefs tool, SKIP IT. Do NOT re-frame.
-
+   - STRICT FILTER 3 (extractive, not generative): each step must be supported by a quote from the source text. If the article only mentions a product without explaining HOW to use it, DO NOT invent the steps from your background knowledge. Return zero how-tos for that chunk.
+{skip_clause}
    NEGATIVE EXAMPLE — do NOT extract a how-to from a passage like this:
-   "You can automatically brainstorm seed keywords in Keywords Explorer; summarise top-ranking content in AI Content Helper; analyse any website's best-performing pages in Site Explorer."
+   "You can automatically brainstorm ideas in Tool A; summarise content in Tool B; analyse pages in Tool C."
    This is a feature MENTION, not a procedure. There are no steps to extract. Return [] for howtos.
 
    POSITIVE EXAMPLE — a passage like this IS a how-to:
-   "To find a competitor's top pages: 1) Open Site Explorer and enter the competitor's domain. 2) Click the Top Pages report in the left sidebar. 3) Sort by Traffic descending. 4) Filter Position 1-10 to focus on pages they rank well for."
+   "To find a competitor's top pages: 1) Open the tool and enter the competitor's domain. 2) Click the Top Pages report in the left sidebar. 3) Sort by Traffic descending. 4) Filter by position to focus on pages they rank well for."
 
    Per-step REQUIRED field `source_quote`: a SHORT verbatim substring (≤3–10 words) of the source text that justifies this step. The substring will be checked for an exact match against the source. If you cannot quote the source for a step, omit that step. If you cannot quote any step, omit the entire how-to.
 
 2. INSIGHTS & STATS — specific, quotable facts. Each must be:
    - Standalone-readable: someone could paste it into a blog post and it makes sense.
    - Specific: a number, %, named study, or concrete finding. Not vibes, not generic advice.
-   - From Ahrefs data/research/blog OR a clearly cited external stat that supports an Ahrefs claim.
+   - From original research, a study, or a clearly cited external stat.
    - One claim per entry. Do NOT bundle multiple stats into one card.
 
 3. CONCEPTS & MECHANISMS — 'how X works' / 'what Y means' explainers. Each must be:
-   - Relevant to Ahrefs use cases: AI search mechanics, ranking signals, crawling/indexing, SEO concepts, LLM behaviour that affects visibility, search-engine architecture, etc.
+   - About a real mechanism or process worth understanding (not vibes, not platitudes).
    - NOT generic marketing theory, NOT business strategy, NOT product release notes.
    - One concept per card. If the article explains multiple distinct concepts, emit multiple cards.
    - Summary must be plain-English, one sentence, understandable without the source.
    - Key points: 3-7 bullets covering the mechanism + practical implications. Each bullet under 25 words.
 
-4. PRODUCT INFO — facts about a specific Ahrefs product or feature, OR a use case (job the product solves). Each must be:
-   - About a named Ahrefs product (Site Explorer, Keywords Explorer, Site Audit, Rank Tracker, Brand Radar, AI Content Helper, Content Explorer, Web Analytics, Agent A, Ahrefs API, Ahrefs Evolve, etc.) OR a named sub-feature (Top Pages report, Best by Links, AI Overviews tracking, Custom Prompts, Connectors framework, etc.).
+4. PRODUCT INFO — facts about {label_phrase}, OR a use case (job the product solves). Each must be:
+   - About {products_scope}.
    - One fact OR one use case per card.
-   - NOT a generic SEO stat from research (those go to INSIGHTS).
+   - NOT a generic stat from research (those go to INSIGHTS).
    - NOT a step-by-step procedure (those go to HOWTOS).
-   - NOT a mechanism explainer about how search/AI works (those go to CONCEPTS).
+   - NOT a mechanism explainer (those go to CONCEPTS).
 
-   IMPORTANT: numbers are NOT required. A product fact does not need a percentage or quantity. "Site Explorer surfaces pages with declining traffic" is a complete fact. Don't skip product info just because no number is mentioned. Don't try to make insights out of these either — keep them in products.
+   IMPORTANT: numbers are NOT required. A product fact does not need a percentage or quantity. "The tool surfaces pages with declining traffic" is a complete fact. Don't skip product info just because no number is mentioned. Don't try to make insights out of these either — keep them in products.
 
    Schema fields:
    - `claim` (required): one-sentence statement — becomes the card heading.
-   - `product` (required): canonical Ahrefs product/feature name.
+   - `product` (required): canonical product/feature name.
    - `fact_type` (required): one of: capability, limit, pricing, integration, plan, api, behaviour, release, use_case, scale.
    - `detail` (optional): one-line expansion, numeric specifics, persona, or example.
    - `source_url`, `source_title`, `date`, `topic_tag` (optional).
@@ -675,100 +703,79 @@ EXTRACT_SYSTEM = """You are an Ahrefs knowledge curator. Read the source content
    - The use case must be supported by the source: the source must describe the product doing this job, not just hint at it.
    - If the source lists multiple use cases for the same product, emit multiple cards (one each).
 
-   POSITIVE EXAMPLES of product facts:
-   - claim: "Brand Radar custom prompts cost ~6 checks per prompt per cycle.", fact_type: limit
-   - claim: "Site Explorer's Top Pages report supports filtering by Declining traffic.", fact_type: capability
-   - claim: "Ahrefs API v3 DELETE on brand-radar-prompts returns 405 — prompts can only be removed via the UI.", fact_type: api
-   - claim: "Agent A connectors are typed integrations grouped by provider.", fact_type: capability
-
    SCALE FACTS (fact_type = "scale"):
-   - Numbers about the SIZE or THROUGHPUT of Ahrefs' underlying data platform: index size, crawl rate, keyword counts, backlink graph size, refresh cadence, content corpus size.
-   - These are PRODUCT INFO, NOT generic SEO insights. Even though they're numeric, they describe what Ahrefs HAS, not what SEO research has found. Route them to PRODUCT INFO, not INSIGHTS.
-   - `product` field for scale facts: use the relevant product/component name (e.g. "Ahrefs Index", "AhrefsBot", "Keywords database", "Backlink index", or a specific tool if scoped).
-
-   POSITIVE EXAMPLES of scale facts:
-   - claim: "Ahrefs has indexed over 170 trillion pages.", product: "Ahrefs Index", fact_type: scale
-   - claim: "AhrefsBot crawls 5 million pages per minute.", product: "AhrefsBot", fact_type: scale
-   - claim: "Ahrefs tracks 41.9 billion keywords.", product: "Keywords database", fact_type: scale
-   - claim: "Ahrefs has mapped 3.5 trillion external backlinks.", product: "Backlink index", fact_type: scale
-
-   POSITIVE EXAMPLES of use cases:
-   - claim: "Find decaying pages on your site with Site Explorer's Top Pages report.", product: "Site Explorer", fact_type: use_case, detail: "Filter by Declining traffic + low KD to surface easy wins."
-   - claim: "Track how often AI Overviews cite your brand vs competitors with Brand Radar.", product: "Brand Radar", fact_type: use_case
-   - claim: "Run an autonomous Monday-morning report of pages that lost 20%+ traffic with Agent A.", product: "Agent A", fact_type: use_case, detail: "Schedule a workflow that pulls GSC + Site Explorer data and posts to Slack."
-   - claim: "Brainstorm content angles for a new keyword using AI Content Helper.", product: "AI Content Helper", fact_type: use_case
+   - Numbers about the SIZE or THROUGHPUT of the product's underlying data platform: index size, throughput, record counts, refresh cadence, corpus size.
+   - These are PRODUCT INFO, NOT generic insights. Even though they're numeric, they describe what the PRODUCT HAS, not what external research has found. Route them to PRODUCT INFO, not INSIGHTS.
 
    NEGATIVE EXAMPLES (do NOT emit these as products):
-   - "68% of pages have no backlinks." → insight (this is a finding ABOUT the web, derived from Ahrefs data, not a fact about Ahrefs the product)
+   - "68% of pages have no backlinks." → insight (a finding about the world, not a fact about the product)
    - "How AI search engines retrieve content." → concept
-   - "To find decaying content, open Site Explorer, then click Top Pages, then…" → howto (a step-by-step procedure, not a use case)
-   - Generic vague claims like "Agent A is the future of SEO" → skip entirely
+   - "To find X, open the tool, then click Y, then…" → howto (a step-by-step procedure, not a use case)
+   - Generic vague claims like "Product X is the future of marketing" → skip entirely
 
    DISAMBIGUATION between SCALE (product) and INSIGHT:
-   - "Ahrefs has indexed 170 trillion pages." → SCALE product fact (the size of Ahrefs' index)
-   - "68% of pages on the web have no backlinks." → INSIGHT (a finding about the web that Ahrefs measured)
-   - If the number describes Ahrefs' own infrastructure/data → product (scale).
-   - If the number describes what they found by looking at the web → insight.
+   - If the number describes the PRODUCT'S OWN infrastructure/data → product (scale).
+   - If the number describes what was FOUND by looking at the world → insight.
 
 Return valid JSON only, no markdown fences. Schema:
-{
+{{
   "howtos": [
-    {
+    {{
       "title": "How to ...",
       "steps": [
-        {"text": "Open Site Explorer and enter your domain.", "source_quote": "Open Site Explorer"},
-        {"text": "Go to the Top Pages report.", "source_quote": "Top Pages report"}
+        {{"text": "Open the tool and enter your domain.", "source_quote": "Open the tool"}},
+        {{"text": "Go to the Top Pages report.", "source_quote": "Top Pages report"}}
       ]
-    }
+    }}
   ],
   "insights": [
-    {
+    {{
       "claim": "One-sentence quotable statement of the fact.",
       "number": "68%",
-      "source_url": "https://ahrefs.com/blog/...",
-      "source_title": "Ahrefs Study: ...",
+      "source_url": "https://example.com/blog/...",
+      "source_title": "Study: ...",
       "date": "2024-03",
       "topic_tag": "backlinks",
       "context": "Optional one-line note about sample/methodology if needed."
-    }
+    }}
   ],
   "concepts": [
-    {
+    {{
       "concept": "How AI search engines retrieve content",
       "summary": "AI search engines route a query through an LLM that calls a retrieval layer, then synthesizes an answer from the returned passages.",
       "key_points": [
         "Query is first rephrased by the LLM into one or more sub-queries.",
-        "Sub-queries hit a retrieval index (sometimes Bing, sometimes a proprietary crawler).",
+        "Sub-queries hit a retrieval index.",
         "Top passages are ranked + summarized into the visible answer.",
         "Citations are post-hoc — the LLM picks which retrieved sources to attribute."
       ],
-      "source_url": "https://ahrefs.com/seo/how-ai-search-engines-work",
+      "source_url": "https://example.com/how-ai-search-engines-work",
       "source_title": "How AI Search Engines Work",
       "date": "2025-01",
       "topic_tag": "ai-search"
-    }
+    }}
   ],
   "products": [
-    {
-      "claim": "Brand Radar custom prompts cost ~6 checks per prompt per cycle.",
-      "product": "Brand Radar",
+    {{
+      "claim": "Custom prompts cost ~6 checks per prompt per cycle.",
+      "product": "Tool Name",
       "fact_type": "limit",
-      "detail": "Counts against the monthly plan limit + any PAYG balance.",
-      "source_url": "https://ahrefs.com/...",
-      "source_title": "Brand Radar docs",
+      "detail": "Counts against the monthly plan limit.",
+      "source_url": "https://example.com/...",
+      "source_title": "Tool docs",
       "date": "2026-04",
-      "topic_tag": "brand-radar"
-    },
-    {
-      "claim": "Find decaying pages on your site with Site Explorer's Top Pages report.",
-      "product": "Site Explorer",
+      "topic_tag": "limits"
+    }},
+    {{
+      "claim": "Find decaying pages on your site with the Top Pages report.",
+      "product": "Tool Name",
       "fact_type": "use_case",
-      "detail": "Filter by Declining traffic + low KD to surface easy wins.",
-      "source_url": "https://ahrefs.com/...",
-      "topic_tag": "site-explorer"
-    }
+      "detail": "Filter by Declining traffic to surface easy wins.",
+      "source_url": "https://example.com/...",
+      "topic_tag": "use-cases"
+    }}
   ]
-}
+}}
 
 Rules:
 - If nothing qualifies for a bucket, return an empty array for that bucket.
@@ -776,6 +783,9 @@ Rules:
 - Prefer the article's own published URL as source_url. If only a URL was provided to you and the content references "this article", use that URL.
 - Be aggressive on filtering. Quality over quantity. Better to return 0 items than to lower the bar.
 - A single article may yield items in multiple buckets simultaneously. Don't force everything into one bucket."""
+
+
+EXTRACT_SYSTEM = _build_extract_system(BRAND_NAME)
 
 
 @blueprint.route("/ingest", methods=["GET"])
@@ -965,7 +975,7 @@ def _extract_one_chunk(chunk_text, source_url, chunk_idx=1, total_chunks=1):
         model=LLM_MODEL,
         messages=[
             {"role": "system", "content": EXTRACT_SYSTEM},
-            {"role": "user", "content": f"Extract Ahrefs how-tos, quotable insights, concept explainers, and product info from this content.{hint}\nCONTENT:\n{chunk_text}"}
+            {"role": "user", "content": f"Extract how-tos, quotable insights, concept explainers, and product info from this content.{hint}\nCONTENT:\n{chunk_text}"}
         ],
         response_format={"type": "json_object"},
     )
