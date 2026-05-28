@@ -12,7 +12,7 @@ A small Flask app for building a team **knowledge base** where:
 - **An LLM curates incoming content.** Paste a URL, text, or a file — the app fetches & chunks it, asks an LLM to extract structured items into four buckets (insights / concepts / product info / how-tos), runs a dedup judge against your existing cards, and shows you the proposed changes. You decide what to keep, edit, skip, or merge.
 - **Postgres is only scratch space** for in-flight extractions and the dedup-judge verdict cache. Nothing about the knowledge base itself lives in the DB.
 
-This is a stripped-down standalone version of an internal tool. The extraction prompts are written for a specific brand ("Ahrefs") — you can keep them as-is to see how they work, or rewrite the system prompt in `source_of_truth.py` (`EXTRACT_SYSTEM`) for your own brand / domain.
+This is a stripped-down standalone version of an internal tool. The extraction prompt is brand-neutral by default. To make extraction sharper, set `SOT_BRAND_NAME=YourBrand` in your env — the prompt will then require HOW-TOS and PRODUCT INFO cards to be scoped to your brand's products, filtering out generic procedures and competitor mentions.
 
 ---
 
