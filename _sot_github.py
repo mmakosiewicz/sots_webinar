@@ -132,7 +132,8 @@ def _remove_from_index(path):
 
 
 def _regenerate_reference(index):
-    """Rebuild ~/workspace/sot_reference.md from the index. Buckets: insights + concepts + products + howtos."""
+    """Rebuild the local reference markdown file (path from SOT_REFERENCE_FILE env) from the index.
+    Buckets: insights + concepts + products + howtos."""
     try:
         insights_entry = next((e for e in index if e.get("type") == "insights"), None)
         concepts_entry = next((e for e in index if e.get("type") == "concepts"), None)
@@ -164,7 +165,7 @@ def _regenerate_reference(index):
             lines.append(f"{products_entry['count']} product facts.\n")
 
         if howtos:
-            lines.append("\n## Ahrefs How-To Guides\n")
+            lines.append("\n## How-To Guides\n")
             for h in howtos:
                 lines.append(f"### {h['title']}")
                 lines.append(f"File: `{h['path']}`")
@@ -184,7 +185,7 @@ def _regenerate_reference(index):
 # ── Public API ──────────────────────────────────────────────────
 
 INSIGHTS_PATH = "pages/insights.md"
-INSIGHTS_HEADER = "# Insights & Stats\n\n> Rolling list of quotable facts from Ahrefs studies, blog, and supporting external research. Each entry = one specific claim with source + date.\n\n---\n"
+INSIGHTS_HEADER = "# Insights & Stats\n\n> Rolling list of quotable facts from studies, blog posts, and external research. Each entry = one specific claim with source + date.\n\n---\n"
 
 
 def _format_insight_card(card):
@@ -260,7 +261,7 @@ def read_insights_raw():
 
 # ── Concepts & Mechanisms (third bucket) ─────────────────────────
 CONCEPTS_PATH = "pages/concepts.md"
-CONCEPTS_HEADER = "# Concepts & Mechanisms\n\n> Rolling list of 'how X works' explainers relevant to Ahrefs use cases (AI search, ranking signals, crawling, indexing, etc.). Each entry = one concept with a plain-English summary + key mechanism/implication bullets.\n\n---\n"
+CONCEPTS_HEADER = "# Concepts & Mechanisms\n\n> Rolling list of 'how X works' explainers. Each entry = one concept with a plain-English summary + key mechanism/implication bullets.\n\n---\n"
 
 
 def _format_concept_card(card):
@@ -337,7 +338,7 @@ def read_concepts_raw():
 
 # ── Product Info (fourth bucket) ──────────────────────────────────────
 PRODUCTS_PATH = "pages/products.md"
-PRODUCTS_HEADER = "# Product Info\n\n> Rolling list of facts about Ahrefs products (Site Explorer, Keywords Explorer, Site Audit, Rank Tracker, Brand Radar, AI Content Helper, Content Explorer, Web Analytics, Agent A, etc.). Each entry = one specific product fact: a capability, limit, pricing detail, integration, or behaviour.\n\n---\n"
+PRODUCTS_HEADER = "# Product Info\n\n> Rolling list of facts about your own product (capabilities, limits, pricing, integrations, scale, behaviour). Each entry = one specific product fact.\n\n---\n"
 
 
 def _format_product_card(card):
