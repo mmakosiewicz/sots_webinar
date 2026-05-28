@@ -59,6 +59,23 @@ def slugify(text):
     return re.sub(r'[^a-z0-9]+', '-', text.lower().strip()).strip('-')[:80]
 
 
+_HOWTO_PATH_RE = re.compile(r"^howtos/[a-z0-9][a-z0-9-]{0,99}\.md$")
+
+
+def _validate_howto_path(path):
+    """Return True iff `path` looks like a legitimate how-to file path.
+
+    Defends against the `<path:path>` route variable being abused to read or
+    delete arbitrary files in the SOT GitHub repo. We accept only paths of
+    the shape `howtos/<slug>.md` where slug matches our own slugify output.
+    """
+    if not path or len(path) > 120:
+        return False
+    if ".." in path or path.startswith("/"):
+        return False
+    return bool(_HOWTO_PATH_RE.match(path))
+
+
 def _parse_page_content(raw):
     """Strip the '# Title' and '> Category:' header from stored markdown, return (title, category, body)."""
     lines = (raw or "").split("\n")
@@ -486,6 +503,8 @@ def _parse_howto_content(raw):
 
 @blueprint.route("/howto/view/<path:path>")
 def howto_view(path):
+    if not _validate_howto_path(path):
+        return redirect(url_for("source_of_truth.howto_list"))
     raw = read_page(path)
     if not raw:
         return redirect(url_for("source_of_truth.howto_list"))
@@ -496,6 +515,8 @@ def howto_view(path):
 
 @blueprint.route("/howto/edit/<path:path>", methods=["GET", "POST"])
 def howto_edit(path):
+    if not _validate_howto_path(path):
+        return redirect(url_for("source_of_truth.howto_list"))
     raw = read_page(path)
     if not raw:
         return redirect(url_for("source_of_truth.howto_list"))
@@ -520,6 +541,8 @@ def howto_edit(path):
 
 @blueprint.route("/howto/delete/<path:path>", methods=["POST"])
 def howto_delete(path):
+    if not _validate_howto_path(path):
+        return redirect(url_for("source_of_truth.howto_list"))
     raw = read_page(path)
     if raw:
         howto = _parse_howto_content(raw)
@@ -1030,20 +1053,69 @@ def _extract_one(actual_content, source_url, progress_cb=None):
     return all_h, all_i, all_c, all_p, total_chunks
 
 
+def _is_url_safe(url):
+    """SSRF guard: only allow public http(s) URLs.
+
+    Rejects:
+      - non-http(s) schemes (file://, gopher://, ftp://, data:, etc.)
+      - hosts that resolve to loopback / private / link-local / reserved IPs
+      - bare IP literals in private ranges
+    """
+    from urllib.parse import urlparse
+    import socket
+    import ipaddress
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False, "unparseable URL"
+    if parsed.scheme not in ("http", "https"):
+        return False, f"scheme {parsed.scheme!r} not allowed"
+    host = parsed.hostname
+    if not host:
+        return False, "missing host"
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False, "DNS lookup failed"
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return False, f"host resolves to non-public address {addr}"
+    return True, None
+
+
 def _fetch_url(url):
     """Fetch a URL and return reasonably clean text.
 
     Uses `trafilatura` if available (best extraction), otherwise falls back
     to `requests` + a minimal HTML strip. Returns (text, error).
     """
+    ok, why = _is_url_safe(url)
+    if not ok:
+        return None, f"refused: {why}"
     try:
         import requests
     except ImportError:
         return None, "requests not installed"
     try:
-        resp = requests.get(url, timeout=30, headers={
-            "User-Agent": "Mozilla/5.0 (SourceOfTruth/1.0)"
-        })
+        resp = requests.get(
+            url,
+            timeout=30,
+            allow_redirects=False,  # don't let a 302 sneak past _is_url_safe
+            headers={"User-Agent": "Mozilla/5.0 (SourceOfTruth/1.0)"},
+        )
         resp.raise_for_status()
     except Exception as e:
         return None, f"fetch failed: {e}"[:200]
