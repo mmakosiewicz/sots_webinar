@@ -1,5 +1,11 @@
 # Source of Truth (SOT)
 
+> ⚠️ **Security notice.** This is a single-team admin tool with no multi-user
+> identity model. It ships with three auth modes: `none` (loopback only),
+> HTTP Basic, and shared-token. **The app refuses to start on a non-loopback
+> host unless auth is configured.** See the [Security](#security) section
+> before exposing this anywhere.
+
 A small Flask app for building a team **knowledge base** where:
 
 - **GitHub is the database.** Every page, insight, concept, product fact, and how-to is a markdown file in a GitHub repo. Anyone with repo access can read or edit on github.com directly.
@@ -19,6 +25,31 @@ This is a stripped-down standalone version of an internal tool. The extraction p
 - `trafilatura` for URL fetching, `python-docx` + `pypdf` for file uploads
 
 ---
+
+## Security
+
+The original version of this app lived behind a workspace SSO layer. The
+standalone version has no built-in identity model — every route is either
+open, behind HTTP Basic, or behind a shared token. Mitigations baked in:
+
+- **Default-deny on exposure.** `app.py` binds to `127.0.0.1` and refuses to
+  start on a public host unless `SOT_AUTH_MODE` is set or you explicitly
+  pass `SOT_ALLOW_OPEN=1`.
+- **Werkzeug debug is off by default** (it's interactive RCE). Opt in with
+  `FLASK_DEBUG=1` — never on a host strangers can reach.
+- **SSRF guard on URL ingest.** `/api/ingest` resolves the host and rejects
+  loopback / private / link-local / reserved IPs. Non-http(s) schemes are
+  refused. Redirects are disabled (`allow_redirects=False`) so a 302 can't
+  sneak the fetcher into an internal address.
+- **Markdown output is sanitized.** The Jinja `markdown` filter renders
+  through `bleach` with a small tag/attribute allowlist — no `<script>`,
+  no event handlers, no `javascript:` URLs.
+- **Path traversal on `<path:path>` routes is restricted.** `/howto/...`
+  routes only accept paths matching `howtos/<slug>.md`.
+- **Upload size is capped** (`MAX_CONTENT_LENGTH`, default 12 MB).
+
+No CSRF protection ships in the box. If you wire this up with auth + cookies
+for a multi-user setting, add Flask-WTF / CSRFProtect yourself.
 
 ## Quickstart
 
@@ -87,10 +118,32 @@ Teammates can edit any of these files directly on GitHub. Hit **Reindex** in the
 
 ---
 
+## Configuration reference
+
+| Env var | Purpose | Required |
+|---|---|---|
+| `DATABASE_URL` | Postgres conninfo / URL | yes |
+| `OPENAI_BASE_URL` | OpenAI-compatible endpoint | no (default `https://api.openai.com/v1`) |
+| `OPENAI_API_KEY` | API key for that endpoint | yes |
+| `SOT_EXTRACT_MODEL` | Model for the curator LLM | no |
+| `SOT_JUDGE_MODEL` | Model for the dedup judge | no |
+| `SOT_GITHUB_REPO` | `owner/repo` that stores the knowledge base | yes |
+| `SOT_GITHUB_PAT` | PAT with Contents:read+write on that repo | yes |
+| `SOT_REFERENCE_PATH` | Optional local mirror of the index | no |
+| `SOT_HOST` | Bind host (default `127.0.0.1`) | no |
+| `PORT` | Bind port (default 5000) | no |
+| `FLASK_DEBUG` | `1` = Werkzeug debugger on (NEVER on public hosts) | no |
+| `FLASK_SECRET_KEY` | Flask session secret (random per-process if unset) | no |
+| `SOT_MAX_UPLOAD_BYTES` | Max request body size (default 12 MB) | no |
+| `SOT_AUTH_MODE` | `none` / `basic` / `token` (default `none`) | no |
+| `SOT_AUTH_USER`, `SOT_AUTH_PASSWORD` | Basic-auth credentials | when `mode=basic` |
+| `SOT_AUTH_TOKEN` | Shared token | when `mode=token` |
+| `SOT_ALLOW_OPEN` | `1` = allow `mode=none` on a non-loopback host | no |
+
 ## What's intentionally simplified vs. the original
 
 - **Search**: the original app uses hybrid Postgres FTS + OpenAI embeddings via a shared search lib. This standalone version ships with a simple substring search over titles/summaries from `index.json`. Swap in your own search if you want fancier ranking.
-- **Auth**: there is none. Run behind your own reverse proxy / SSO if you put this anywhere public.
+- **Auth**: HTTP Basic / shared-token only. No multi-user identity, no SSO. Run behind your own reverse proxy if you need richer auth.
 - **No background workers**: ingestion runs in a daemon thread inside the Flask process. Fine for personal / small-team use; for higher volume, move the extraction step into a proper job queue.
 
 ---
