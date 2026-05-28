@@ -24,7 +24,7 @@
   {% else %}
   <div class="bg-panel rounded-lg border border-border p-12 text-center">
     <h3 class="text-lg font-medium mb-2">No {{ description }}s yet</h3>
-    <p class="text-muted text-sm mb-4">Ingest an Ahrefs article to extract content.</p>
+    <p class="text-muted text-sm mb-4">Ingest an article to extract content.</p>
     <a href="{{ url_for('source_of_truth.ingest_form') }}" class="px-4 py-2 bg-accent text-accent-foreground rounded-button text-sm font-medium hover:bg-accent-hover inline-block no-underline">+ Ingest Content</a>
   </div>
   {% endif %}
