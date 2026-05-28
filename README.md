@@ -91,6 +91,83 @@ for a multi-user setting, add Flask-WTF / CSRFProtect yourself.
 
 ---
 
+## How it works — a 30-second tour
+
+The app turns "I just read something worth remembering" into a curated, dedup-aware GitHub repo of knowledge cards. Three actors are involved every cycle:
+
+1. **You** — paste a URL, drop a file, or type a note.
+2. **The curator LLM** — reads the source, extracts up to four kinds of items (insights, concepts, product info, how-tos), and proposes them as cards.
+3. **The dedup judge** — an overlap-coefficient pre-filter plus a cheap LLM judge that compares every proposed card to your existing library and flags duplicates or partial overlaps.
+
+You see every proposal before anything is written. Nothing lands in GitHub without your click.
+
+## A typical session
+
+### 1. Land on the dashboard (`/sot/`)
+
+Tile counts for each bucket (insights / concepts / product info / how-tos), the five most recent cards in each, and a search box at the top. Any in-flight extraction shows up as a "Pending" card linking to its review screen.
+
+The **Reindex** button rebuilds `index.json` by walking the GitHub repo — use this after a teammate edits files directly on github.com.
+
+### 2. Ingest content (`/sot/ingest`)
+
+Four input modes (tabs across the top):
+
+- **URLs (up to 10)** — paste one per line. The default. Processed serially, ~10–20s per URL.
+- **Files (up to 10)** — drag-and-drop `.md`, `.docx`, or `.pdf`. Total request body capped at 12 MB by `MAX_CONTENT_LENGTH`.
+- **Single URL** — same as bulk but for a one-off.
+- **Raw text** — paste an article body, study summary, anything text-shaped.
+
+Click **Extract Facts**. The progress panel shows live status like `chunk 2/3 · checking for look-alikes…`. When the worker finishes you're routed to the review page.
+
+Under the hood, per source: fetch → chunk (≤11 K chars each, cap 5 chunks per source) → LLM extraction → dedup pre-filter + judge. The cap on chunks is a deliberate cost ceiling; how much you actually spend per source depends entirely on which model you've set `SOT_EXTRACT_MODEL` to. The original deployment ran on Claude Sonnet 4.5 and budgeted roughly $0.05 per chunk; if you point this at `gpt-4o-mini` or similar it'll be an order of magnitude cheaper.
+
+### 3. Review proposals (`/sot/review/<id>`)
+
+The review screen groups candidates **by source** (URL or filename), with a per-source success/failure summary at the top — helpful when one of ten URLs failed to fetch.
+
+Each candidate card shows:
+
+- The proposed content (claim / concept / how-to steps), with bucket icons (🧩 concepts, 📦 products, 📄 insights, 🗂 how-tos)
+- A status pill on the right:
+  - ⚠️ **look-alike** — dedup judge says this is the same as an existing card (+ confidence %)
+  - ⏈ **partial overlap** — related but not duplicate
+  - ● **new** — no nearby card found
+- For look-alikes / partial overlaps: a "Closest:" line with the existing card's heading and the judge's one-line rationale
+
+For each candidate you pick one of:
+
+- **Add as new** — write it as a fresh card
+- **Skip** — drop it
+- **Merge sources → `<existing card>`** — only shown for **insights** and **product info** when a look-alike was found. Appends the new source URL to the existing card's "Also cited:" footer instead of creating a duplicate. Concepts and how-tos don't have a merge action; they're either new or skipped.
+
+The default selection is set by the dedup verdict: SAME defaults to skip (or merge, where available), DIFFERENT defaults to accept. You override with the radio buttons.
+
+**Select all** / **Clear all** at the top of the page applies to every visible candidate.
+
+Hit **Apply**. Accepted items are committed to the GitHub repo via the Contents API — one commit per file. The pending row in Postgres flips to `applied` and disappears from the queue.
+
+### 4. Browse, search, edit
+
+- `/sot/insights`, `/sot/concepts`, `/sot/products` — every card in one scrolling page each (one markdown file in the repo per bucket).
+- `/sot/howtos` — list of how-to guides; each is its own file.
+- `/sot/howto/edit/howtos/<slug>.md` — form editor for how-to guides (title, description, steps, tags). The other three buckets are append-only via review.
+- `/sot/search?q=...` — substring match over `index.json` titles, summaries, categories.
+
+### 5. Teammates editing on GitHub directly
+
+Anyone with repo access can edit any `.md` file on github.com. After they push, hit **Reindex** on the dashboard to refresh `index.json` so the new content surfaces in search and the dashboard counts.
+
+## When things go wrong
+
+- **"No GitHub PAT configured"** at the top of the dashboard → `SOT_GITHUB_PAT` env var is empty or unset, or the PAT lacks `Contents: read+write` on `SOT_GITHUB_REPO`.
+- **Ingestion stuck on "extracting…"** → check `OPENAI_API_KEY` and that `OPENAI_BASE_URL` is reachable. The worker is a daemon thread inside the Flask process; if Flask restarts, in-flight extractions die and their pending rows stay in `extracting` status (visible on the dashboard).
+- **"refused: host resolves to non-public address"** on a URL ingest → the SSRF guard is doing its job; the app refuses to fetch loopback / private / link-local / reserved addresses. Set `SOT_HOST=127.0.0.1` with auth disabled if you're trying to fetch from a service on your own machine — but more likely, just use the right public URL.
+- **413 on file upload** → you hit the 12 MB total request cap. Bump `SOT_MAX_UPLOAD_BYTES` if you really need to.
+- **App refuses to start: "SOT_AUTH_MODE=none but SOT_HOST is not loopback"** → you bound to a non-loopback host without configuring auth. See the [Security](#security) section.
+
+---
+
 ## Repo layout in GitHub (what the app writes)
 
 ```
@@ -105,16 +182,6 @@ for a multi-user setting, add Flask-WTF / CSRFProtect yourself.
 ```
 
 Teammates can edit any of these files directly on GitHub. Hit **Reindex** in the dashboard after manual edits to rebuild `index.json`.
-
----
-
-## How a typical ingest flow looks
-
-1. Open `/sot/ingest` and paste a URL (or text, or upload a `.md` / `.docx` / `.pdf`).
-2. The app fetches + chunks the content and asks the LLM to extract candidate cards.
-3. For each candidate, a dedup pre-filter (overlap coefficient) shortlists similar existing cards, and a cheap LLM judges SAME / PARTIAL / DIFFERENT.
-4. You see a review page with all candidates grouped by bucket. For each, choose to accept, skip, edit, or merge into an existing card.
-5. The accepted items are committed to GitHub via the Contents API.
 
 ---
 
